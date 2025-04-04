@@ -1,48 +1,34 @@
+
 import time
 from src.Drone import Drone
+import tasks
 
-if __name__ == '__main__' and False:
+drone: Drone = None
+
+def init():
+    global drone
     drone = Drone()
+    drone.allow_experimental = True
+    drone.land_on_programm_exit()
+
     drone.connect()
-    drone.take_off()
-    time.sleep(2)
 
-    # Drehung zu Beginn
-    # drone.rotate(360)
-
-    size = 0.5
-    velocity = Drone.VELOCITY * 2
-    base_height = drone.default_height
-    start_position = (0, 0, base_height)
-
-    # Effizienteste Route für den Würfel
-    path = [
-        start_position, (size, 0, base_height), (size, size, base_height), (0, size, base_height), start_position,
-        (0, 0, base_height + size), (size, 0, base_height + size), (size, size, base_height + size),
-        (0, size, base_height + size), (0, 0, base_height + size),
-        (0, size, base_height + size), (0, size, base_height), (size, size, base_height),
-        (size, size, base_height + size), (size, 0, base_height + size), (size, 0, base_height),
-        start_position
-    ]
-
-    for wp in path:
-        drone.move_to(*wp, mode="indirect", velocity=velocity)
-        time.sleep(2)
-
-    # Drehung am Ende
-    # drone.rotate(360)
-
+def end():
     drone.land()
     drone.disconnect()
 
-# if __name__ == '__main__':
-#     drone = Drone()
-#     drone.connect()
-#     drone.take_off()
-#     time.sleep(2)
-#
-#     drone.move_to(0, 0, 1, mode = "indirect")
-#     drone.move_to(1, 0, 2, mode = "indirect")
-#     drone.move_to(0, 0, 1, mode = "indirect")
-#
-#     drone.land()
+if __name__ == '__main__':
+    init()
+
+    drone.take_off()
+    time.sleep(2)
+
+    base_height = drone.position[2]
+
+    tasks.cube_size = 0.7
+    tasks.cube(drone)
+
+    # drone.move_to(0, 0, 1)
+
+
+    end()
