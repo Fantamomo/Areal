@@ -1,5 +1,6 @@
+import math
 import sys
-import time
+import atexit
 import logging
 
 import cflib.crtp
@@ -18,10 +19,18 @@ class Drone:
 
         self.uri = uri
         self.default_height = default_height
-        self.position = [0.0, 0.0, default_height]  # x, y, z
+        self.position: list[float] = [0.0, 0.0, default_height]  # x, y, z
         self.scf = None
         self.mc = None
+        self.allow_experimental = False
+        self.__is_land_on_programm_exit__ = False
+        self.angle = 0.0
         cflib.crtp.init_drivers(enable_debug_driver=False)
+
+    def land_on_programm_exit(self):
+        if not self.__is_land_on_programm_exit__:
+            atexit.register(self.land)
+            self.__is_land_on_programm_exit__ = True
 
     def connect(self):
         self.logger.info("Connecting to Drone")
@@ -46,6 +55,15 @@ class Drone:
             self.position[2] = 0.0
 
     def move_to(self, x: float, y: float, z: float = None, velocity: float = VELOCITY, mode: str = "direct"):
+        """
+        :param x: Moves the drone forward
+        :param y: Moves the drone to the sites
+        :param z: height
+        :param velocity:
+        :param mode: 'direct': The drone moves direct to the point, that could lead to that the drone moves diagonal.
+        'indirect': The drone moves indirectly, that means, it will only moves at the x, y, z coordinate one at a time.
+        :return:
+        """
         if self.mc:
             target_z = self.position[2] if z is None else z
             self.logger.info(f"Moving to: ({x}, {y}, {target_z}) with mode: {mode}")
@@ -74,10 +92,13 @@ class Drone:
             self.logger.info(f"Rotating {angle} degrees")
             self.mc.turn_left(angle) if angle > 0 else self.mc.turn_right(-angle)
 
-    def circle(self, radius: float, duration: float = 5.0):
+            self.angle += angle
+            self.angle %= 360
+
+    def circle(self, radius: float, velocity: float = VELOCITY):
         if self.mc:
             self.logger.info(f"Flying in a circle with radius {radius}")
-            self.mc.circle_right(radius, duration)
+            self.mc.circle_right(radius, velocity)
 
     def emergency_stop(self):
         if self.scf:
@@ -93,3 +114,61 @@ class Drone:
             self.scf.close_link()
             self.scf = None
             self.mc = None
+
+    def tuple_position(self):
+        return tuple(self.position)
+
+    def zigzag(self, length: float, width: float, steps: int, velocity: float = VELOCITY):
+        if self.mc and self.allow_experimental:
+            self.logger.info(f"Flying in zigzag pattern with length {length}, width {width} and {steps} steps")
+            step_length = length / steps
+            direction = 1
+            for _ in range(steps):
+                self.mc.move_distance(step_length, direction * width, 0, velocity)
+                direction *= -1
+
+    def spiral_up(self, height: float, radius: float, turns: int = 3, duration: float = 5.0,
+                  velocity: float = VELOCITY):
+        if self.mc and self.allow_experimental:
+            self.logger.info(f"Ascending in a spiral: height={height}, radius={radius}, turns={turns}")
+            step_height = height / turns
+            for _ in range(turns):
+                self.mc.circle_right(radius, duration / turns)
+                self.mc.move_distance(0, 0, step_height, velocity)
+
+    def wave_flight(self, length: float, amplitude: float, waves: int, velocity: float = VELOCITY):
+        if self.mc and self.allow_experimental:
+            self.logger.info(f"Flying in a wave pattern with length {length}, amplitude {amplitude}, waves {waves}")
+            step_length = length / (waves * 10)
+            for i in range(waves * 10):
+                y_offset = amplitude * math.sin((i / (waves * 10)) * 2 * math.pi)
+                self.mc.move_distance(step_length, y_offset, 0, velocity)
+
+    def adjust_height(self, target_height: float, velocity: float = VELOCITY):
+        if self.mc:
+            dz = target_height - self.position[2]
+            self.logger.info(f"Adjusting height to {target_height}")
+            self.mc.move_distance(0, 0, dz, velocity)
+            self.position[2] = target_height
+
+    def follow_path(self, waypoints: list[tuple[float, float, float]], velocity: float = VELOCITY):
+        if self.mc:
+            self.logger.info(f"Following path with {len(waypoints)} waypoints")
+            for x, y, z in waypoints:
+                self.move_to(x, y, z, velocity)
+
+    def return_to_start(self, velocity: float = VELOCITY, mode: str = "direct"):
+        if self.mc:
+            self.logger.info("Returning to start position considering rotation")
+
+            # Berechnung der relativen Distanz zum Startpunkt
+            dx = -self.position[0]
+            dy = -self.position[1]
+
+            # Umrechnung in globale Koordinaten basierend auf der Rotation
+            angle_rad = math.radians(self.angle)
+            global_dx = dx * math.cos(angle_rad) - dy * math.sin(angle_rad)
+            global_dy = dx * math.sin(angle_rad) + dy * math.cos(angle_rad)
+
+            # Bewegung zurück zum Startpunkt
+            self.move_to(global_dx, global_dy, self.default_height, velocity, mode)
